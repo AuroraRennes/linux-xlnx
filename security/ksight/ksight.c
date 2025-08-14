@@ -5,44 +5,60 @@
 #include <linux/ktime.h>
 #include <linux/ksight.h>
 
-/* Core LSM hook handlers */
+/* -----------------------
+ * LSM hook implementations
+ * -----------------------
+ *
+ * Minimal examples of LSM hooks for read/write and send/recv.
+ * For file read/write you should implement file_read_iter/file_write_iter
+ * hooks with careful handling of scatter/gather iov_iter cases.
+ */
+
+/* socket_recvmsg: called after the kernel receives into the buffer.
+ */
 static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
-                                 int size, int flags)
+				 int size, int flags)
 {
 	struct tag_event ev;
+	struct iovec iov;
 
-	if (!msg || !msg->msg_iter.count)
+	if (!msg || !msg->msg_iter.count || msg->msg_iter.count == 0)
 		return 0;
 
-	ev.pid = task_pid_nr(current);
-	ev.tid = task_tgid_nr(current);
+	ev.pid = (u32)task_pid_nr(current);
+	ev.tid = (u32)task_tgid_nr(current);
 	ev.timestamp_ns = ktime_get_ns();
-	ev.addr_start = 0;
-	ev.addr_end = 0;
-	ev.tag_id = 0x1;
-	ev.op_type = 2;
+	ev.addr_start = (unsigned long)iov.iov_base;
+	ev.addr_end = ev.addr_start + size;
+	ev.tag_id = 0x00000001;
+	ev.op_type = 2; /* recv */
 
-	ksight_push_event(&ev);
+	push_tag_event(&ev);
 	return 0;
 }
 
+/* socket_sendmsg: called before kernel sends from user buffer.
+ */
 static int ksight_socket_sendmsg(struct socket *sock, struct msghdr *msg,
-                                 int size)
+				 int size)
 {
 	struct tag_event ev;
+	struct iovec iov;
 
-	if (!msg || !msg->msg_iter.count)
+	if (!msg || !msg->msg_iter.count || msg->msg_iter.count == 0)
 		return 0;
 
-	ev.pid = task_pid_nr(current);
-	ev.tid = task_tgid_nr(current);
-	ev.timestamp_ns = ktime_get_ns();
-	ev.addr_start = 0;
-	ev.addr_end = 0;
-	ev.tag_id = 0x1;
-	ev.op_type = 3;
+	iov = iov_iter_iovec(&msg->msg_iter);
 
-	ksight_push_event(&ev);
+	ev.pid = (u32)task_pid_nr(current);
+	ev.tid = (u32)task_tgid_nr(current);
+	ev.timestamp_ns = ktime_get_ns();
+	ev.addr_start = (unsigned long)iov.iov_base;
+	ev.addr_end = ev.addr_start + iov.iov_len;
+	ev.tag_id = 0x00000001;
+	ev.op_type = 3; /* send */
+
+	push_tag_event(&ev);
 	return 0;
 }
 

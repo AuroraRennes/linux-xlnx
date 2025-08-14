@@ -1,3 +1,4 @@
+```
 Linux kernel
 ============
 
@@ -16,3 +17,29 @@ several of them using the Restructured Text markup notation.
 Please read the Documentation/process/changes.rst file, as it contains the
 requirements for building and running the kernel, and information about
 the problems which may result by upgrading your kernel.
+```
+
+## Ksight, LSM module for syscall tagging
+
+
+Built against petalinux 2023.1, you can generate the patch with ([docs](https://docs.amd.com/r/2023.1-English/ug1144-petalinux-tools-reference-guide/Creating-and-Adding-Patches-For-Software-Components-within-a-PetaLinux-Project)):
+
+```bash
+petalinux-devtool modify linux-xlnx
+```
+
+Creates the directory `plnx_project/components/yocto/workspace/sources/linux-xlnx` from [Xilinx github repo](https://github.com/Xilinx/linux-xlnx). Going into this repo, we can add our own remote using:
+
+```bash
+git remote add aurora https://github.com/AuroraRennes/linux-xlnx
+git fetch aurora ksight:ksight
+git checkout ksight
+```
+
+To generate the patch in the `meta-user` directory, populating with patches and updating the recipe file:
+
+```bash
+petalinux-devtool finish linux-xlnx <plnx_project>/project-spec/meta-user
+petalinux-build -c kernel
+```
+
