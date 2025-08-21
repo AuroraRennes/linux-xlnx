@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-#include <linux/module.h>
-#include <linux/lsm_hooks.h>
-#include <linux/security.h>
-#include <linux/ktime.h>
-#include <linux/ksight.h>
+#include "ksight.h"
 
 /* -----------------------
  * LSM hook implementations
@@ -25,6 +21,8 @@ static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 	if (!msg || !msg->msg_iter.count || msg->msg_iter.count == 0)
 		return 0;
 
+	iov = iov_iter_iovec(&msg->msg_iter);
+
 	ev.pid = (u32)task_pid_nr(current);
 	ev.tid = (u32)task_tgid_nr(current);
 	ev.timestamp_ns = ktime_get_ns();
@@ -33,7 +31,7 @@ static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 	ev.tag_id = 0x00000001;
 	ev.op_type = 2; /* recv */
 
-	push_tag_event(&ev);
+	ksight_push_event(&ev);
 	return 0;
 }
 
@@ -58,7 +56,7 @@ static int ksight_socket_sendmsg(struct socket *sock, struct msghdr *msg,
 	ev.tag_id = 0x00000001;
 	ev.op_type = 3; /* send */
 
-	push_tag_event(&ev);
+	ksight_push_event(&ev);
 	return 0;
 }
 
@@ -83,4 +81,7 @@ static __init int ksight_lsm_init(void)
 	return 0;
 }
 
-security_initcall(ksight_lsm_init);
+DEFINE_LSM(ksight) = {
+	.name = "ksight",
+	.init = ksight_lsm_init,
+};

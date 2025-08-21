@@ -2,7 +2,13 @@
 #ifndef _LINUX_KSIGHT_H
 #define _LINUX_KSIGHT_H
 
-#include <linux/types.h>
+#include <linux/init.h>
+#include <linux/lsm_hooks.h>
+#include <linux/ktime.h>
+#include <linux/module.h>
+#include <linux/security.h>
+#include <linux/socket.h>
+#include <linux/uio.h>
 
 struct tag_event {
 	u32 pid;
