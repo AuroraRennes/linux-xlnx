@@ -2,6 +2,11 @@
 #ifndef _LINUX_KSIGHT_H
 #define _LINUX_KSIGHT_H
 
+#define HEALTHCHECK 1
+
+#ifdef HEALTHCHECK
+#include <linux/atomic.h>
+#endif
 #include <linux/init.h>
 #include <linux/lsm_hooks.h>
 #include <linux/ktime.h>

@@ -5,10 +5,15 @@
  * LSM hook implementations
  * -----------------------
  *
- * Minimal examples of LSM hooks for read/write and send/recv.
- * For file read/write you should implement file_read_iter/file_write_iter
- * hooks with careful handling of scatter/gather iov_iter cases.
+ * Ksight LSM hooks for system call information flows. Each hooked
+ * system call triggers the send of a tag event in Ksight shared
+ * memory, with corresponding information for the co-processor
+ * to update shadow memory.
  */
+
+#ifdef HEALTHCHECK
+static atomic64_t ev_count = ATOMIC64_INIT(0);
+#endif
 
 /* socket_recvmsg: called after the kernel receives into the buffer.
  */
@@ -69,7 +74,12 @@ static struct security_hook_list ksight_hooks[] __ro_after_init = {
 /* Public API for driver */
 void ksight_push_event(const struct tag_event *ev)
 {
-	/* Placeholder — driver will override or connect this at runtime */
+#ifdef HEALTHCHECK
+	atomic64_inc(&ev_count);
+
+	if ((atomic64_read(&ev_count) & 0xFFFF) == 0)  /* every 65536 events */
+		pr_info("ksight: events=%lld\n", atomic64_read(&ev_count));
+#endif
 }
 EXPORT_SYMBOL_GPL(ksight_push_event);
 
