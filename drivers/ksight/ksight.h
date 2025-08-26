@@ -14,6 +14,7 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/errno.h>
+#include <linux/of_reserved_mem.h>
 #include <linux/io.h>
 #include <linux/types.h>
 #include <linux/sysfs.h>
