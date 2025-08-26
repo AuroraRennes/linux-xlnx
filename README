@@ -39,7 +39,7 @@ git checkout ksight
 To generate the patch in the `meta-user` directory, populating with patches and updating the recipe file:
 
 ```bash
-petalinux-devtool finish linux-xlnx <plnx_project>/project-spec/meta-user
+petalinux-devtool finish linux-xlnx <full_path_plnx_project>/project-spec/meta-user
 petalinux-build -c kernel
 ```
 
