@@ -113,7 +113,7 @@ static DEVICE_ATTR_RO(ring_phys);
  * Platform probe/remove
  * ---------------------- */
 
-static int ksight_probe(struct platform_device *pdev)
+ static int ksight_probe(struct platform_device *pdev)
 {
     struct reserved_mem *rmem;
     int ret;
@@ -156,6 +156,7 @@ static int ksight_probe(struct platform_device *pdev)
         goto err_class;
     }
 
+    /* Sysfs attribute for debug */
     ret = device_create_file(ksight_dev, &dev_attr_ring_phys);
     if (ret) {
         dev_err(&pdev->dev, "failed to create sysfs attr\n");
