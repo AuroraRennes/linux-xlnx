@@ -11,7 +11,7 @@
  * to update shadow memory.
  */
 
-#ifdef HEALTHCHECK
+#if HEALTHCHECK
 static atomic64_t ev_count = ATOMIC64_INIT(0);
 #endif
 
@@ -71,17 +71,16 @@ static struct security_hook_list ksight_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(socket_sendmsg, ksight_socket_sendmsg),
 };
 
-/* Public API for driver */
+/* Healthcheck without driver */
+#if HEALTHCHECK
 void ksight_push_event(const struct tag_event *ev)
 {
-#ifdef HEALTHCHECK
 	atomic64_inc(&ev_count);
 
 	if ((atomic64_read(&ev_count) & 0xFFFF) == 0)  /* every 65536 events */
 		pr_info("ksight: events=%lld\n", atomic64_read(&ev_count));
-#endif
 }
-EXPORT_SYMBOL_GPL(ksight_push_event);
+#endif
 
 /* Init */
 static __init int ksight_lsm_init(void)

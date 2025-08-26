@@ -2,9 +2,9 @@
 #ifndef _LINUX_KSIGHT_H
 #define _LINUX_KSIGHT_H
 
-#define HEALTHCHECK 1
+#define HEALTHCHECK 0
 
-#ifdef HEALTHCHECK
+#if HEALTHCHECK
 #include <linux/atomic.h>
 #endif
 #include <linux/init.h>
@@ -25,6 +25,10 @@ struct tag_event {
 	u32 op_type;    /* 0=read,1=write,2=recv,3=send */
 } __packed;
 
+#if HEALTHCHECK
 void ksight_push_event(const struct tag_event *ev);
+#else
+extern void ksight_push_event(const struct tag_event *ev);
+#endif
 
 #endif /* _LINUX_KSIGHT_H */
