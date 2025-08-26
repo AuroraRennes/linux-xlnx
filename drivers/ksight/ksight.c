@@ -41,6 +41,8 @@ static struct device *ksight_dev;  /* Device for user-space interaction */
  * ---------------------- */
 void ksight_push_event(const struct tag_event *ev)
 {
+    /* Early bailout in case LSM hooks are used before buffer initialization */
+    if (!shm) return;
     /* Memory barrier to access producer index */
     u32 prod = smp_load_acquire(&shm->ctrl.prod);
     u32 next = prod + 1;
