@@ -29,6 +29,7 @@ struct ksight_shm {
 static struct ksight_shm *shm;
 static void __iomem *shm_phys_base;
 static size_t shm_size;
+static phys_addr_t shm_phys_addr;
 
 static DECLARE_WAIT_QUEUE_HEAD(buf_wq);
 
@@ -96,6 +97,17 @@ static const struct file_operations ksight_fops = {
 };
 
 /* ----------------------
+ * sysfs expose ring physical base
+ * ---------------------- */
+
+static ssize_t ring_phys_show(struct device *dev,
+                              struct device_attribute *attr, char *buf)
+{
+    return sysfs_emit(buf, "%pa\n", &shm_phys_addr);
+}
+static DEVICE_ATTR_RO(ring_phys);
+
+/* ----------------------
  * Platform probe / remove
  * ---------------------- */
 static int ksight_probe(struct platform_device *pdev)
@@ -112,6 +124,7 @@ static int ksight_probe(struct platform_device *pdev)
 
     /* Map it */
     shm_size = resource_size(res);
+    shm_phys_addr = res->start;
     shm_phys_base = memremap(res->start, shm_size, MEMREMAP_WT);
     if (!shm_phys_base) return -ENOMEM;
 
@@ -123,10 +136,10 @@ static int ksight_probe(struct platform_device *pdev)
 
     /* Create the character device */
     ksight_class = class_create(THIS_MODULE, "ksight");
-    if (!ksight_class)
+    if (IS_ERR(ksight_class))
         return -ENOMEM;
     ksight_dev = device_create(ksight_class, NULL, 0, NULL, "ksight");
-    if (!ksight_dev)
+    if (IS_ERR(ksight_dev))
         return -ENOMEM;
 
     /* Register the cleanup action on error */
@@ -140,7 +153,7 @@ static int ksight_probe(struct platform_device *pdev)
         return ret;
     }
 
-    dev_info(&pdev->dev, "ksight DMA ring initialized, size=%zu entries\n", shm->ctrl.size);
+    dev_info(&pdev->dev, "ksight DMA ring initialized, size=%u entries\n", shm->ctrl.size);
     return 0;
 }
 

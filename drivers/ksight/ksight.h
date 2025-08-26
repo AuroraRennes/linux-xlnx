@@ -16,6 +16,7 @@
 #include <linux/errno.h>
 #include <linux/io.h>
 #include <linux/types.h>
+#include <linux/sysfs.h>
 #include <linux/atomic.h>
 
 struct tag_event {
