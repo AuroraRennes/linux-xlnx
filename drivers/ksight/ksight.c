@@ -110,57 +110,56 @@ static ssize_t ring_phys_show(struct device *dev,
 static DEVICE_ATTR_RO(ring_phys);
 
 /* ----------------------
- * Platform probe / remove
+ * Platform probe/remove
  * ---------------------- */
+
 static int ksight_probe(struct platform_device *pdev)
 {
-    struct resource *res;
+    struct reserved_mem *rmem;
     int ret;
 
-    /* Get the memory resource from DT */
-    res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-    if (!res) {
-        dev_err(&pdev->dev, "ksight: no memory resource\n");
+    /* Find reserved memory from DT */
+    rmem = of_reserved_mem_lookup(pdev->dev.of_node);
+    if (!rmem) {
+        dev_err(&pdev->dev, "ksight: cannot find reserved memory\n");
         return -ENODEV;
     }
 
-    shm_phys_addr = res->start;
-    shm_size      = resource_size(res);
+    shm_phys_addr = rmem->base;
+    shm_size      = rmem->size;
 
-    /* Map the reserved memory into kernel space */
-    shm_phys_base = devm_ioremap_resource(&pdev->dev, res);
-    if (IS_ERR(shm_phys_base))
-        return PTR_ERR(shm_phys_base);
+    /* Map reserved memory into kernel VA */
+    shm_phys_base = memremap(rmem->base, rmem->size, MEMREMAP_WB);
+    if (!shm_phys_base) {
+        dev_err(&pdev->dev, "ksight: memremap failed\n");
+        return -ENOMEM;
+    }
 
     /* Initialize the ring buffer */
     shm = (struct ksight_shm *)shm_phys_base;
     memset(shm, 0, shm_size);
+
     shm->ctrl.size = (u32)((shm_size - sizeof(struct ksight_ring_ctrl)) /
                            sizeof(struct tag_event));
     shm->ctrl.mask = shm->ctrl.size - 1;
 
-    /* Create the ksight class */
+    /* Create ksight class */
     ksight_class = class_create(THIS_MODULE, "ksight");
-    if (IS_ERR(ksight_class))
-        return PTR_ERR(ksight_class);
+    if (IS_ERR(ksight_class)) {
+        ret = PTR_ERR(ksight_class);
+        goto err_unmap;
+    }
 
-    /* Create the ksight device */
     ksight_dev = device_create(ksight_class, NULL, 0, NULL, "ksight");
-    if (IS_ERR(ksight_dev))
-        return PTR_ERR(ksight_dev);
+    if (IS_ERR(ksight_dev)) {
+        ret = PTR_ERR(ksight_dev);
+        goto err_class;
+    }
 
-    /* Register cleanup action */
-    ret = devm_add_action_or_reset(&pdev->dev,
-                                   (void(*)(void *))class_destroy,
-                                   ksight_class);
-    if (ret)
-        return ret;
-
-    /* Sysfs attribute */
     ret = device_create_file(ksight_dev, &dev_attr_ring_phys);
     if (ret) {
         dev_err(&pdev->dev, "failed to create sysfs attr\n");
-        return ret;
+        goto err_dev;
     }
 
     dev_info(&pdev->dev,
@@ -168,6 +167,14 @@ static int ksight_probe(struct platform_device *pdev)
              &shm_phys_addr, shm_phys_base, shm->ctrl.size);
 
     return 0;
+
+err_dev:
+    device_destroy(ksight_class, 0);
+err_class:
+    class_destroy(ksight_class);
+err_unmap:
+    memunmap(shm_phys_base);
+    return ret;
 }
 
 static int ksight_remove(struct platform_device *pdev)
