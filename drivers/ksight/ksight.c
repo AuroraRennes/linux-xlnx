@@ -116,10 +116,18 @@ static DEVICE_ATTR_RO(ring_phys);
  static int ksight_probe(struct platform_device *pdev)
 {
     struct reserved_mem *rmem;
+    struct device_node *np;
     int ret;
 
-    /* Find reserved memory from DT */
-    rmem = of_reserved_mem_lookup(pdev->dev.of_node);
+    /* Find reserved memory from DT via phandle */
+    np = of_parse_phandle(pdev->dev.of_node, "memory-region", 0);
+    if (!np) {
+        dev_err(&pdev->dev, "ksight: no memory-region property\n");
+        return -EINVAL;
+    }
+
+    rmem = of_reserved_mem_lookup(np);
+    of_node_put(np);
     if (!rmem) {
         dev_err(&pdev->dev, "ksight: cannot find reserved memory\n");
         return -ENODEV;
