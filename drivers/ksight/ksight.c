@@ -30,6 +30,8 @@ static struct ksight_shm *shm;
 static void __iomem *shm_phys_base;
 static size_t shm_size;
 static phys_addr_t shm_phys_addr;
+static dev_t ksight_devt;
+static struct cdev ksight_cdev;
 
 static DECLARE_WAIT_QUEUE_HEAD(buf_wq);
 
@@ -119,15 +121,40 @@ static DEVICE_ATTR_RO(ring_phys);
     struct device_node *np;
     int ret;
 
-    /* Find reserved memory from DT via phandle */
+    /* Find reserved memory from DT via phandle,
+     * Needed as the ksight-shm shared memory used
+     * a reference to the reserved memory part.
+     *
+     * Device tree excerpt:
+     * / {
+        reserved-memory {
+            #address-cells= <2>;
+            #size-cells= <2>;
+            ranges;
+            ksight_buffer: ksight_buffer@60400000 {
+                compatible = "shared-dma-pool";
+                no-map;                                 // Incompatible with reusable
+                reg = <0x0 0x60400000 0x0 0x00200000>;  // Address, size
+                label = "ksight_buffer";                // Label to use
+            };
+        };
+
+        ksight-shm@60400000 {
+            compatible = "aurora,ksight-shm";          // Name used in the driver
+            device-name = "ksight-shm0";               // Name of the buffer
+            reg = <0x0 0x60400000 0x0 0x00200000>;     // Address, size
+            memory-region = <&ksight_buffer>;          // Link to the reserved-memory defined earlier
+        };
+    }; */
+
     np = of_parse_phandle(pdev->dev.of_node, "memory-region", 0);
     if (!np) {
         dev_err(&pdev->dev, "ksight: no memory-region property\n");
         return -EINVAL;
     }
 
-    rmem = of_reserved_mem_lookup(np);
-    of_node_put(np);
+    rmem = of_reserved_mem_lookup(np); // Get the reserved memory from the above node
+    of_node_put(np);                   // Frees the reference to the node
     if (!rmem) {
         dev_err(&pdev->dev, "ksight: cannot find reserved memory\n");
         return -ENODEV;
@@ -151,6 +178,21 @@ static DEVICE_ATTR_RO(ring_phys);
                            sizeof(struct tag_event));
     shm->ctrl.mask = shm->ctrl.size - 1;
 
+
+    /* Character device, allocate region */
+    ret = alloc_chrdev_region(&ksight_devt, 0, 1, "ksight");
+    if (ret)
+        goto err_unmap;
+
+    /* Initialize character device */
+    cdev_init(&ksight_cdev, &ksight_fops);
+    ksight_cdev.owner = THIS_MODULE;
+    ret = cdev_add(&ksight_cdev, ksight_devt, 1);
+    if (ret)
+        goto err_unregister;
+
+    pr_info("ksight: cdev added, major=%u minor=%u\n", MAJOR(ksight_devt), MINOR(ksight_devt));
+
     /* Create ksight class */
     ksight_class = class_create(THIS_MODULE, "ksight");
     if (IS_ERR(ksight_class)) {
@@ -158,7 +200,7 @@ static DEVICE_ATTR_RO(ring_phys);
         goto err_unmap;
     }
 
-    ksight_dev = device_create(ksight_class, NULL, 0, NULL, "ksight");
+    ksight_dev = device_create(ksight_class, NULL, ksight_devt, NULL, "ksight");
     if (IS_ERR(ksight_dev)) {
         ret = PTR_ERR(ksight_dev);
         goto err_class;
@@ -181,6 +223,10 @@ err_dev:
     device_destroy(ksight_class, 0);
 err_class:
     class_destroy(ksight_class);
+err_cdev:
+    cdev_del(&ksight_cdev);
+err_unregister:
+    unregister_chrdev_region(ksight_devt, 1);
 err_unmap:
     memunmap(shm_phys_base);
     return ret;
@@ -191,6 +237,7 @@ static int ksight_remove(struct platform_device *pdev)
     device_remove_file(ksight_dev, &dev_attr_ring_phys);
     device_destroy(ksight_class, 0);
     class_destroy(ksight_class);
+    cdev_del(&ksight_cdev);
     return 0;
 }
 
