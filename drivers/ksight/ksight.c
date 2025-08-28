@@ -72,7 +72,12 @@ EXPORT_SYMBOL_GPL(ksight_push_event);
 static ssize_t ksight_read(struct file *f, char __user *buf, size_t len, loff_t *ppos)
 {
     size_t n = 0;
-    while (n == 0) {
+
+    /* Early bailout to avoid lock */
+    if (len < sizeof(struct tag_event))
+        return -EINVAL;
+
+    for (;;) {
         /* Memory barrier for producer and USER consumer */
         u32 prod = smp_load_acquire(&shm->ctrl.prod);
         u32 cons = READ_ONCE(shm->ctrl.cons_user);
@@ -80,6 +85,7 @@ static ssize_t ksight_read(struct file *f, char __user *buf, size_t len, loff_t 
         if (prod == cons) {
             if (f->f_flags & O_NONBLOCK)
                 return -EAGAIN;
+            /* Wait until the producer advances beyond latest consumer */
             wait_event_interruptible(buf_wq, smp_load_acquire(&shm->ctrl.prod) != cons);
             continue;
         }
@@ -197,7 +203,7 @@ static DEVICE_ATTR_RO(ring_phys);
     ksight_class = class_create(THIS_MODULE, "ksight");
     if (IS_ERR(ksight_class)) {
         ret = PTR_ERR(ksight_class);
-        goto err_unmap;
+        goto err_cdev;
     }
 
     ksight_dev = device_create(ksight_class, NULL, ksight_devt, NULL, "ksight");
@@ -220,7 +226,7 @@ static DEVICE_ATTR_RO(ring_phys);
     return 0;
 
 err_dev:
-    device_destroy(ksight_class, 0);
+    device_destroy(ksight_class, ksight_devt);
 err_class:
     class_destroy(ksight_class);
 err_cdev:
@@ -235,9 +241,11 @@ err_unmap:
 static int ksight_remove(struct platform_device *pdev)
 {
     device_remove_file(ksight_dev, &dev_attr_ring_phys);
-    device_destroy(ksight_class, 0);
+    device_destroy(ksight_class, ksight_devt);
     class_destroy(ksight_class);
     cdev_del(&ksight_cdev);
+    unregister_chrdev_region(ksight_devt, 1);
+    memunmap(shm_phys_base);
     return 0;
 }
 
