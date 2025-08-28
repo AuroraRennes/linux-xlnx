@@ -78,27 +78,28 @@ static ssize_t ksight_read(struct file *f, char __user *buf, size_t len, loff_t 
     if (len < sizeof(struct tag_event))
         return -EINVAL;
 
-    for (;;) {
-        /* Memory barrier for producer and USER consumer */
-        u32 prod = smp_load_acquire(&shm->ctrl.prod);
-        u32 cons = READ_ONCE(shm->ctrl.cons_user);
-        /* If no new events, wait for a wake up from the wait queue */
-        if (prod == cons) {
-            if (f->f_flags & O_NONBLOCK)
-                return -EAGAIN;
-            /* Wait until the producer advances beyond latest consumer */
-            wait_event_interruptible(buf_wq, smp_load_acquire(&shm->ctrl.prod) != cons);
-            continue;
-        }
-        /* Copy all new events to the user-space */
-        while (n < len / sizeof(struct tag_event) && cons != prod) {
-            struct tag_event ev = shm->slots[cons & shm->ctrl.mask];
-            if (copy_to_user(buf + n * sizeof(ev), &ev, sizeof(ev)))
-                return -EFAULT;
-            cons++; n++;
-        }
-        smp_store_release(&shm->ctrl.cons_user, cons);
+    /* Memory barrier for producer and USER consumer */
+    u32 prod = smp_load_acquire(&shm->ctrl.prod);
+    u32 cons = READ_ONCE(shm->ctrl.cons_user);
+    /* If no new events, wait for a wake up from the wait queue */
+    if (prod == cons) {
+        if (f->f_flags & O_NONBLOCK)
+            return -EAGAIN;
+        /* Wait until the producer advances beyond latest consumer */
+        if(wait_event_interruptible(buf_wq, smp_load_acquire(&shm->ctrl.prod) != cons))
+            return -ERESTARTSYS;
+        prod = smp_load_acquire(&shm->ctrl.prod);
     }
+    /* Copy all new events to the user-space */
+    while (n < len / sizeof(struct tag_event) && cons != prod) {
+        struct tag_event ev = shm->slots[cons & shm->ctrl.mask];
+        if (copy_to_user(buf + n * sizeof(ev), &ev, sizeof(ev)))
+            return -EFAULT;
+        cons++;
+        n++;
+    }
+
+    smp_store_release(&shm->ctrl.cons_user, cons);
     return n * sizeof(struct tag_event);
 }
 
