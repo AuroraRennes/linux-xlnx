@@ -31,4 +31,6 @@ void ksight_push_event(const struct tag_event *ev);
 extern void ksight_push_event(const struct tag_event *ev);
 #endif
 
+extern bool ksight_enabled;
+
 #endif /* _LINUX_KSIGHT_H */

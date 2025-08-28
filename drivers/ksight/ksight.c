@@ -29,10 +29,15 @@ struct ksight_shm {
 static struct ksight_shm *shm;
 static void __iomem *shm_phys_base;
 static size_t shm_size;
-static phys_addr_t shm_phys_addr;
 static dev_t ksight_devt;
 static struct cdev ksight_cdev;
 static struct platform_device *ksight_pdev;
+
+/* sysfs attributes */
+static phys_addr_t shm_phys_addr;
+bool ksight_enabled;
+EXPORT_SYMBOL_GPL(ksight_enabled);
+static DEFINE_MUTEX(ksight_enable_lock);
 
 static DECLARE_WAIT_QUEUE_HEAD(buf_wq);
 
@@ -109,15 +114,41 @@ static const struct file_operations ksight_fops = {
 };
 
 /* ----------------------
- * sysfs expose ring physical base
+ * sysfs attributes
  * ---------------------- */
 
+
+/* Ring physical address */
 static ssize_t ring_phys_show(struct device *dev,
                               struct device_attribute *attr, char *buf)
 {
     return sysfs_emit(buf, "%pa\n", &shm_phys_addr);
 }
 static DEVICE_ATTR_RO(ring_phys);
+
+/* Enable flag */
+static ssize_t enable_show(struct device *dev,
+                           struct device_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%d\n", ksight_enabled ? 1 : 0);
+}
+
+static ssize_t enable_store(struct device *dev,
+                            struct device_attribute *attr, const char *buf, size_t count)
+{
+    unsigned long val;
+
+    /* Check unsigned int */
+    if (kstrtoul(buf, 0, &val))
+        return -EINVAL;
+
+    mutex_lock(&ksight_enable_lock);
+    ksight_enabled = !!val; // 1 if nonzero, 0 otherwise
+    mutex_unlock(&ksight_enable_lock);
+
+    return count;
+}
+static DEVICE_ATTR_RW(enable);
 
 /* ----------------------
  * Platform probe/remove
@@ -216,9 +247,15 @@ static DEVICE_ATTR_RO(ring_phys);
     /* Sysfs attribute for debug */
     ret = device_create_file(ksight_dev, &dev_attr_ring_phys);
     if (ret) {
-        dev_err(&pdev->dev, "failed to create sysfs attr\n");
+        dev_err(&pdev->dev, "failed to create ring_phys sysfs attr\n");
         goto err_dev;
     }
+
+    ret = device_create_file(ksight_dev, &dev_attr_enable);
+    if (ret) {
+        dev_err(&pdev->dev, "failed to create enable sysfs attribute\n");
+    }
+
 
     dev_info(&pdev->dev,
              "ksight DMA ring initialized phys=%pa virt=%p size=%u entries\n",

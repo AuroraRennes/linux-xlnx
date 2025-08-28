@@ -23,6 +23,9 @@ static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 	struct tag_event ev;
 	struct iovec iov;
 
+	if (!READ_ONCE(ksight_enabled))
+		return 0;
+
 	if (!msg || !msg->msg_iter.count || msg->msg_iter.count == 0)
 		return 0;
 
@@ -47,6 +50,9 @@ static int ksight_socket_sendmsg(struct socket *sock, struct msghdr *msg,
 {
 	struct tag_event ev;
 	struct iovec iov;
+
+	if (!READ_ONCE(ksight_enabled))
+		return 0;
 
 	if (!msg || !msg->msg_iter.count || msg->msg_iter.count == 0)
 		return 0;
