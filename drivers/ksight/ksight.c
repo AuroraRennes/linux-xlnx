@@ -32,6 +32,7 @@ static size_t shm_size;
 static phys_addr_t shm_phys_addr;
 static dev_t ksight_devt;
 static struct cdev ksight_cdev;
+static struct platform_device *ksight_pdev;
 
 static DECLARE_WAIT_QUEUE_HEAD(buf_wq);
 
@@ -140,7 +141,7 @@ static DEVICE_ATTR_RO(ring_phys);
             ksight_buffer: ksight_buffer@60400000 {
                 compatible = "shared-dma-pool";
                 no-map;                                 // Incompatible with reusable
-                reg = <0x0 0x60400000 0x0 0x00200000>;  // Address, size
+                reg = <0x0 0x60400000 0x0 0x04000000>;  // Address, size
                 label = "ksight_buffer";                // Label to use
             };
         };
@@ -148,7 +149,7 @@ static DEVICE_ATTR_RO(ring_phys);
         ksight-shm@60400000 {
             compatible = "aurora,ksight-shm";          // Name used in the driver
             device-name = "ksight-shm0";               // Name of the buffer
-            reg = <0x0 0x60400000 0x0 0x00200000>;     // Address, size
+            size = <0x04000000>;                       // 64MiB
             memory-region = <&ksight_buffer>;          // Link to the reserved-memory defined earlier
         };
     }; */
@@ -183,7 +184,6 @@ static DEVICE_ATTR_RO(ring_phys);
     shm->ctrl.size = (u32)((shm_size - sizeof(struct ksight_ring_ctrl)) /
                            sizeof(struct tag_event));
     shm->ctrl.mask = shm->ctrl.size - 1;
-
 
     /* Character device, allocate region */
     ret = alloc_chrdev_region(&ksight_devt, 0, 1, "ksight");
@@ -268,4 +268,35 @@ static struct platform_driver ksight_platform_driver = {
     },
 };
 
-module_platform_driver(ksight_platform_driver);
+
+/* ----------------------
+ * Platform device registration
+ * ---------------------- */
+
+static int __init ksight_module_init(void)
+{
+    int ret;
+
+    /* Register the platform driver first */
+    ret = platform_driver_register(&ksight_platform_driver);
+    if (ret)
+        return ret;
+
+    /* Register the platform device to trigger the probe */
+    ksight_pdev = platform_device_register_simple("ksight-shm", -1, NULL, 0);
+    if (IS_ERR(ksight_pdev)) {
+        platform_driver_unregister(&ksight_platform_driver);
+        return PTR_ERR(ksight_pdev);
+    }
+
+    return 0;
+}
+
+static void __exit ksight_module_exit(void)
+{
+    platform_device_unregister(ksight_pdev);
+    platform_driver_unregister(&ksight_platform_driver);
+}
+
+module_init(ksight_module_init);
+module_exit(ksight_module_exit);
