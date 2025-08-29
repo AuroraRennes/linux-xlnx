@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0
+
 #include "ksight.h"
+#include <linux/init.h>
+#include <linux/lsm_hooks.h>
+#include <linux/kernel.h>
+#include <linux/ktime.h>
+#include <linux/socket.h>
+#include <linux/types.h>
+#include <linux/uio.h>
+
 
 /* -----------------------
  * LSM hook implementations
@@ -10,10 +19,6 @@
  * memory, with corresponding information for the co-processor
  * to update shadow memory.
  */
-
-#if HEALTHCHECK
-static atomic64_t ev_count = ATOMIC64_INIT(0);
-#endif
 
 /* socket_recvmsg: called after the kernel receives into the buffer.
  */
@@ -76,17 +81,6 @@ static struct security_hook_list ksight_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(socket_recvmsg, ksight_socket_recvmsg),
 	LSM_HOOK_INIT(socket_sendmsg, ksight_socket_sendmsg),
 };
-
-/* Healthcheck without driver */
-#if HEALTHCHECK
-void ksight_push_event(const struct tag_event *ev)
-{
-	atomic64_inc(&ev_count);
-
-	if ((atomic64_read(&ev_count) & 0xFFFF) == 0)  /* every 65536 events */
-		pr_info("ksight: events=%lld\n", atomic64_read(&ev_count));
-}
-#endif
 
 /* Init */
 static __init int ksight_lsm_init(void)

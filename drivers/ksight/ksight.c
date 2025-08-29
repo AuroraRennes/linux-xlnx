@@ -1,6 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0
 
 #include "ksight.h"
+#include <linux/atomic.h>
+#include <linux/cdev.h>
+#include <linux/errno.h>
+#include <linux/fs.h>
+#include <linux/init.h>
+#include <linux/io.h>
+#include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_reserved_mem.h>
+#include <linux/platform_device.h>
+#include <linux/sysfs.h>
+#include <linux/uaccess.h>
+#include <linux/wait.h>
 
 #define DRIVER_NAME "ksight"
 
