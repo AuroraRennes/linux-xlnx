@@ -43,3 +43,4 @@ petalinux-devtool finish linux-xlnx <full_path_plnx_project>/project-spec/meta-u
 petalinux-build -c kernel
 ```
 
+A corresponding utility script that does all of the above is present at the code root, `update_linux_xlnx.sh`. Dropping it at the root of your petalinux project and running `./update_linux_xlnx.sh --build` will update the sources and build the kernel.
