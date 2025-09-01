@@ -25,24 +25,38 @@
 static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 				 int size, int flags)
 {
-	struct tag_event ev;
+	struct ksight_tag_event ev;
 	struct iovec iov;
 
+	/* Bailout if ksight is not enabled */
 	if (!READ_ONCE(ksight_enabled))
 		return 0;
 
+	/* Bailout if there is no message */
 	if (!msg || !msg->msg_iter.count || msg->msg_iter.count == 0)
+		return 0;
+
+	/* Bailout if iov is not a valid user-space buffer */
+	if (!(iter_is_iovec(&msg->msg_iter) || iter_is_ubuf(&msg->msg_iter)))
 		return 0;
 
 	iov = iov_iter_iovec(&msg->msg_iter);
 
-	ev.pid = (u32)task_pid_nr(current);
-	ev.tid = (u32)task_tgid_nr(current);
-	ev.timestamp_ns = ktime_get_ns();
-	ev.addr_start = (unsigned long)iov.iov_base;
-	ev.addr_end = ev.addr_start + size;
-	ev.tag_id = 0x00000001;
-	ev.op_type = 2; /* recv */
+	/* Source = socket */
+	ev.src.ksight_obj_type = KS_OBJ_SOCKET;
+	ev.src.pid  = 0;         /* Not relevant */
+	ev.src.tid  = 0;         /* Not relevant */
+	ev.src.id   = (u64)sock; /* Socket pointer */
+	ev.src.size = 0;         /* Not relevant */
+
+	/* Destination = user buffer */
+	ev.dst.ksight_obj_type = KS_OBJ_MEM;
+	ev.dst.pid    = (u32)task_pid_nr(current);
+	ev.dst.tid    = (u32)task_tgid_nr(current);
+	ev.dst.id     = (u64)iov.iov_base;
+	ev.dst.size   = size; // TODO: or iov.iov_len?
+
+	ev.timestamp = ktime_get_ns();
 
 	ksight_push_event(&ev);
 	return 0;
@@ -53,24 +67,38 @@ static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 static int ksight_socket_sendmsg(struct socket *sock, struct msghdr *msg,
 				 int size)
 {
-	struct tag_event ev;
+	struct ksight_tag_event ev;
 	struct iovec iov;
 
+	/* Bailout if ksight is not enabled */
 	if (!READ_ONCE(ksight_enabled))
 		return 0;
 
+	/* Bailout if there is no message */
 	if (!msg || !msg->msg_iter.count || msg->msg_iter.count == 0)
+		return 0;
+
+	/* Bailout if iov is not a valid user-space buffer */
+	if (!(iter_is_iovec(&msg->msg_iter) || iter_is_ubuf(&msg->msg_iter)))
 		return 0;
 
 	iov = iov_iter_iovec(&msg->msg_iter);
 
-	ev.pid = (u32)task_pid_nr(current);
-	ev.tid = (u32)task_tgid_nr(current);
-	ev.timestamp_ns = ktime_get_ns();
-	ev.addr_start = (unsigned long)iov.iov_base;
-	ev.addr_end = ev.addr_start + iov.iov_len;
-	ev.tag_id = 0x00000001;
-	ev.op_type = 3; /* send */
+	/* Source = user buffer */
+	ev.src.ksight_obj_type = KS_OBJ_MEM;
+	ev.src.pid    = (u32)task_pid_nr(current);
+	ev.src.tid    = (u32)task_tgid_nr(current);
+	ev.src.id     = (u64)iov.iov_base;
+	ev.src.size   = size; // TODO: or iov.iov_len?
+
+	/* Destination = socket */
+	ev.dst.ksight_obj_type = KS_OBJ_SOCKET;
+	ev.dst.pid  = 0;         /* Not relevant */
+	ev.dst.tid  = 0;         /* Not relevant */
+	ev.dst.id   = (u64)sock; /* Socket pointer */
+	ev.dst.size = 0;         /* Not relevant */
+
+	ev.timestamp = ktime_get_ns();
 
 	ksight_push_event(&ev);
 	return 0;

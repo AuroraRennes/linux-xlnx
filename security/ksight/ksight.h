@@ -4,7 +4,7 @@
 
 #include <linux/ksight.h>
 
-extern void ksight_push_event(const struct tag_event *ev);
+extern void ksight_push_event(const struct ksight_tag_event *ev);
 
 extern bool ksight_enabled;
 

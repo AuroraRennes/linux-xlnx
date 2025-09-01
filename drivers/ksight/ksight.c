@@ -37,7 +37,7 @@ struct ksight_ring_ctrl {
 /* Ksight shared memory, control structure and buffer */
 struct ksight_shm {
     struct ksight_ring_ctrl ctrl;
-    struct tag_event slots[];
+    struct ksight_tag_event slots[];
 };
 
 /* Definition of the buffer, its base address and size */
@@ -62,7 +62,7 @@ static struct device *ksight_dev;  /* Device for user-space interaction */
 /* ----------------------
  * Ring buffer push
  * ---------------------- */
-void ksight_push_event(const struct tag_event *ev)
+void ksight_push_event(const struct ksight_tag_event *ev)
 {
     /* Early bailout in case LSM hooks are used before buffer initialization */
     if (!shm) return;
@@ -95,7 +95,7 @@ static ssize_t ksight_read(struct file *f, char __user *buf, size_t len, loff_t 
     size_t n = 0;
 
     /* Early bailout to avoid lock */
-    if (len < sizeof(struct tag_event))
+    if (len < sizeof(struct ksight_tag_event))
         return -EINVAL;
 
     /* Memory barrier for producer and USER consumer */
@@ -111,8 +111,8 @@ static ssize_t ksight_read(struct file *f, char __user *buf, size_t len, loff_t 
         prod = smp_load_acquire(&shm->ctrl.prod);
     }
     /* Copy all new events to the user-space */
-    while (n < len / sizeof(struct tag_event) && cons != prod) {
-        struct tag_event ev = shm->slots[cons & shm->ctrl.mask];
+    while (n < len / sizeof(struct ksight_tag_event) && cons != prod) {
+        struct ksight_tag_event ev = shm->slots[cons & shm->ctrl.mask];
         if (copy_to_user(buf + n * sizeof(ev), &ev, sizeof(ev)))
             return -EFAULT;
         cons++;
@@ -120,7 +120,7 @@ static ssize_t ksight_read(struct file *f, char __user *buf, size_t len, loff_t 
     }
 
     smp_store_release(&shm->ctrl.cons_user, cons);
-    return n * sizeof(struct tag_event);
+    return n * sizeof(struct ksight_tag_event);
 }
 
 static const struct file_operations ksight_fops = {
@@ -229,7 +229,7 @@ static DEVICE_ATTR_RW(enable);
     memset(shm, 0, shm_size);
 
     shm->ctrl.size = (u32)((shm_size - sizeof(struct ksight_ring_ctrl)) /
-                           sizeof(struct tag_event));
+                           sizeof(struct ksight_tag_event));
     shm->ctrl.mask = shm->ctrl.size - 1;
 
     /* Character device, allocate region */
