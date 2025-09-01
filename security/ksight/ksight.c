@@ -5,10 +5,12 @@
 #include <linux/lsm_hooks.h>
 #include <linux/kernel.h>
 #include <linux/ktime.h>
+#include <linux/mm.h>
+#include <linux/rwsem.h>
+#include <linux/sched/mm.h>
 #include <linux/socket.h>
 #include <linux/types.h>
 #include <linux/uio.h>
-
 
 /* -----------------------
  * LSM hook implementations
@@ -27,6 +29,9 @@ static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 {
 	struct ksight_tag_event ev;
 	struct iovec iov;
+	struct vm_area_struct *vma;
+	struct mm_struct *mm;
+	unsigned long addr;
 
 	/* Bailout if ksight is not enabled */
 	if (!READ_ONCE(ksight_enabled))
@@ -40,7 +45,21 @@ static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 	if (!(iter_is_iovec(&msg->msg_iter) || iter_is_ubuf(&msg->msg_iter)))
 		return 0;
 
+	/* Extract the base address from the io vector */
 	iov = iov_iter_iovec(&msg->msg_iter);
+	addr = (u64)iov.iov_base;
+
+	/* Lookup the VMA containing the user buffer */
+	mm = current->mm;
+	if (!mm)
+		return 0;
+
+	down_read(&mm->mmap_lock);
+	vma = find_vma(mm, addr);
+	if (!vma || addr < vma->vm_start) {
+		up_read(&mm->mmap_lock);
+		return 0;
+	}
 
 	/* Source = socket */
 	ev.src.ksight_obj_type = KS_OBJ_SOCKET;
@@ -53,8 +72,10 @@ static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 	ev.dst.ksight_obj_type = KS_OBJ_MEM;
 	ev.dst.pid    = (u32)task_pid_nr(current);
 	ev.dst.tid    = (u32)task_tgid_nr(current);
-	ev.dst.id     = (u64)iov.iov_base;
-	ev.dst.size   = size; // TODO: or iov.iov_len?
+	ev.dst.id     = (u64)vma->vm_start;
+	ev.dst.size   = iov.iov_len;
+
+	up_read(&mm->mmap_lock);
 
 	ev.timestamp = ktime_get_ns();
 
@@ -69,6 +90,10 @@ static int ksight_socket_sendmsg(struct socket *sock, struct msghdr *msg,
 {
 	struct ksight_tag_event ev;
 	struct iovec iov;
+	struct vm_area_struct *vma;
+	struct mm_struct *mm;
+	unsigned long addr;
+
 
 	/* Bailout if ksight is not enabled */
 	if (!READ_ONCE(ksight_enabled))
@@ -82,14 +107,27 @@ static int ksight_socket_sendmsg(struct socket *sock, struct msghdr *msg,
 	if (!(iter_is_iovec(&msg->msg_iter) || iter_is_ubuf(&msg->msg_iter)))
 		return 0;
 
+	/* Extract the base address from the io vector */
 	iov = iov_iter_iovec(&msg->msg_iter);
+	addr = (u64)iov.iov_base;
 
+	/* Lookup the VMA containing the user buffer */
+	mm = current->mm;
+	if (!mm)
+		return 0;
+
+	down_read(&mm->mmap_lock);
+	vma = find_vma(mm, addr);
+	if (!vma || addr < vma->vm_start) {
+		up_read(&mm->mmap_lock);
+		return 0;
+	}
 	/* Source = user buffer */
 	ev.src.ksight_obj_type = KS_OBJ_MEM;
 	ev.src.pid    = (u32)task_pid_nr(current);
 	ev.src.tid    = (u32)task_tgid_nr(current);
-	ev.src.id     = (u64)iov.iov_base;
-	ev.src.size   = size; // TODO: or iov.iov_len?
+	ev.src.id     = (u64)vma->vm_start;
+	ev.src.size   = iov.iov_len;
 
 	/* Destination = socket */
 	ev.dst.ksight_obj_type = KS_OBJ_SOCKET;
@@ -97,6 +135,8 @@ static int ksight_socket_sendmsg(struct socket *sock, struct msghdr *msg,
 	ev.dst.tid  = 0;         /* Not relevant */
 	ev.dst.id   = (u64)sock; /* Socket pointer */
 	ev.dst.size = 0;         /* Not relevant */
+
+	up_read(&mm->mmap_lock);
 
 	ev.timestamp = ktime_get_ns();
 
