@@ -473,6 +473,9 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	if (ret > 0) {
 		fsnotify_access(file);
 		add_rchar(current, ret);
+
+		/* Ksight LSM hook */
+		security_vfs_readfile(file, buf, ret);
 	}
 	inc_syscr(current);
 	return ret;
@@ -587,6 +590,9 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 	if (ret > 0) {
 		fsnotify_modify(file);
 		add_wchar(current, ret);
+
+		/* Ksight LSM hook */
+		security_vfs_writefile(file, buf, ret);
 	}
 	inc_syscw(current);
 	file_end_write(file);
@@ -695,7 +701,7 @@ ssize_t ksys_pwrite64(unsigned int fd, const char __user *buf,
 	f = fdget(fd);
 	if (f.file) {
 		ret = -ESPIPE;
-		if (f.file->f_mode & FMODE_PWRITE)  
+		if (f.file->f_mode & FMODE_PWRITE)
 			ret = vfs_write(f.file, buf, count, &pos);
 		fdput(f);
 	}

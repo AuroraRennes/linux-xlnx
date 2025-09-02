@@ -302,6 +302,12 @@ static int ksight_remove(struct platform_device *pdev)
     return 0;
 }
 
+dev_t ksight_get_devno(void)
+{
+    return ksight_devt;
+}
+EXPORT_SYMBOL_GPL(ksight_get_devno);
+
 /* ----------------------
  * Device tree match and driver registration
  * ---------------------- */

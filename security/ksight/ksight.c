@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
 
 #include "ksight.h"
+#include <linux/fs.h>
 #include <linux/init.h>
-#include <linux/lsm_hooks.h>
 #include <linux/kernel.h>
 #include <linux/ktime.h>
+#include <linux/lsm_hooks.h>
 #include <linux/mm.h>
 #include <linux/rwsem.h>
 #include <linux/sched/mm.h>
@@ -144,10 +145,80 @@ static int ksight_socket_sendmsg(struct socket *sock, struct msghdr *msg,
 	return 0;
 }
 
+static int ksight_vfs_readfile(struct file *file, char __user *buf, ssize_t ret)
+{
+	struct ksight_tag_event ev;
+
+	/* Bailout if ksight is not enabled */
+	if (!READ_ONCE(ksight_enabled))
+		return 0;
+
+	/* Bailout if looking at the character device */
+	if (file->f_inode->i_rdev == ksight_get_devno())
+		return 0;
+
+	/* Source = file */
+	ev.src.ksight_obj_type = KS_OBJ_FILE;
+	ev.src.pid    = 0; /* Not relevant */
+	ev.src.tid    = 0; /* Not relevant */
+	ev.src.id     = (u64)file;
+	ev.src.size   = 0; /* Not relevant */
+
+	/* Destination = user memory */
+	ev.dst.ksight_obj_type = KS_OBJ_MEM;
+	ev.dst.pid  = (u32)task_tgid_nr(current);
+	ev.dst.tid  = (u32)task_tgid_nr(current);
+	ev.dst.id   = (u64)buf;
+	ev.dst.size = ret;
+
+
+	ev.timestamp = ktime_get_ns();
+
+	ksight_push_event(&ev);
+	return 0;
+}
+
+
+static int ksight_vfs_writefile(struct file *file, const char __user *buf, ssize_t ret)
+{
+	struct ksight_tag_event ev;
+
+	/* Bailout if ksight is not enabled */
+	if (!READ_ONCE(ksight_enabled))
+		return 0;
+
+	/* Bailout if looking at the character device */
+	if (file->f_inode->i_rdev == ksight_get_devno())
+		return 0;
+
+	/* Source = user memory */
+	ev.src.ksight_obj_type = KS_OBJ_MEM;
+	ev.src.pid  = (u32)task_tgid_nr(current);
+	ev.src.tid  = (u32)task_pid_nr(current);
+	ev.src.id   = (u64)buf;
+	ev.src.size = ret;
+
+	/* Destination = file */
+	ev.dst.ksight_obj_type = KS_OBJ_FILE;
+	ev.dst.pid    = 0;
+	ev.dst.tid    = 0;
+	ev.dst.id     = (u64)file;
+	ev.dst.size   = 0;
+
+	ev.timestamp = ktime_get_ns();
+
+	ksight_push_event(&ev);
+	return 0;
+}
+
+
+
 /* LSM hook list */
 static struct security_hook_list ksight_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(socket_recvmsg, ksight_socket_recvmsg),
 	LSM_HOOK_INIT(socket_sendmsg, ksight_socket_sendmsg),
+	LSM_HOOK_INIT(vfs_readfile, ksight_vfs_readfile),
+	LSM_HOOK_INIT(vfs_writefile, ksight_vfs_writefile),
 };
 
 /* Init */

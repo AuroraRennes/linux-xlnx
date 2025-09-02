@@ -410,3 +410,9 @@ LSM_HOOK(int, 0, uring_override_creds, const struct cred *new)
 LSM_HOOK(int, 0, uring_sqpoll, void)
 LSM_HOOK(int, 0, uring_cmd, struct io_uring_cmd *ioucmd)
 #endif /* CONFIG_IO_URING */
+
+
+#ifdef CONFIG_SECURITY_KSIGHT
+LSM_HOOK(int, 0, vfs_readfile, struct file *file, char __user *buf, ssize_t ret)
+LSM_HOOK(int, 0, vfs_writefile, struct file *file, const char __user *buf, ssize_t ret)
+#endif /* CONFIG_SECURITY_KSIGHT */

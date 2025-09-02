@@ -2672,3 +2672,15 @@ int security_uring_cmd(struct io_uring_cmd *ioucmd)
 	return call_int_hook(uring_cmd, 0, ioucmd);
 }
 #endif /* CONFIG_IO_URING */
+
+
+#ifdef CONFIG_SECURITY_KSIGHT
+int security_vfs_readfile(struct file *file, char __user *buf, ssize_t ret)
+{
+	return call_int_hook(vfs_readfile, 0, file, buf, ret);
+}
+int security_vfs_writefile(struct file *file, const char __user *buf, ssize_t ret)
+{
+	return call_int_hook(vfs_writefile, 0, file, buf, ret);
+}
+#endif /* CONFIG_SECURITY_KSIGHT */
