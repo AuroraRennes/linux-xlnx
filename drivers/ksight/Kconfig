@@ -1,0 +1,5 @@
+config KSIGHT
+    tristate "Ksight DMA ring driver"
+    depends on SECURITY_KSIGHT
+    help
+      DMA ring buffer driver for the Ksight LSM.
