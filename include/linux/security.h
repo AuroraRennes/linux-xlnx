@@ -2133,4 +2133,20 @@ static inline int security_uring_cmd(struct io_uring_cmd *ioucmd)
 #endif /* CONFIG_SECURITY */
 #endif /* CONFIG_IO_URING */
 
+#ifdef CONFIG_SECURITY_KSIGHT
+#ifdef CONFIG_SECURITY
+extern int security_vfs_readfile(struct file *file, char __user *buf, ssize_t ret);
+extern int security_vfs_writefile(struct file *file, const char __user *buf, ssize_t ret);
+#else
+static inline int security_vfs_readfile(struct file *file, char __user *buf, ssize_t ret)
+{
+	return 0;
+}
+static inline int security_vfs_writefile(struct file *file, const char __user *buf, ssize_t ret)
+{
+	return 0;
+}
+#endif /* CONFIG_SECURITY */
+#endif /* CONFIG_SECURITY_KSIGHT */
+
 #endif /* ! __LINUX_SECURITY_H */

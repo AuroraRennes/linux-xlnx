@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SECURITY_KSIGHT
+        bool "Ksight support"
+        depends on SECURITY
+        default n
+        help
+          KSight is an LSM module that looks over syscalls propagating untrusted
+          information flows (e.g. read, write, sendmsg, recvmsg, etc.). It sends
+          tag events to a ring buffer in DMA to be consumed by a DIFT co-processor.

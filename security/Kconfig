@@ -195,6 +195,9 @@ source "security/safesetid/Kconfig"
 source "security/lockdown/Kconfig"
 source "security/landlock/Kconfig"
 
+# Ksight config
+source "security/ksight/Kconfig"
+
 source "security/integrity/Kconfig"
 
 choice
