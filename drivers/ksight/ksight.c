@@ -46,7 +46,6 @@ static void __iomem *shm_phys_base;
 static size_t shm_size;
 static dev_t ksight_devt;
 static struct cdev ksight_cdev;
-static struct platform_device *ksight_pdev;
 
 /* sysfs attributes */
 static phys_addr_t shm_phys_addr;
@@ -280,7 +279,7 @@ static DEVICE_ATTR_RW(traced_pid);
     pr_info("ksight: cdev added, major=%u minor=%u\n", MAJOR(ksight_devt), MINOR(ksight_devt));
 
     /* Create ksight class */
-    ksight_class = class_create(THIS_MODULE, "ksight");
+    ksight_class = class_create("ksight");
     if (IS_ERR(ksight_class)) {
         ret = PTR_ERR(ksight_class);
         goto err_cdev;
@@ -302,6 +301,11 @@ static DEVICE_ATTR_RW(traced_pid);
     ret = device_create_file(ksight_dev, &dev_attr_enable);
     if (ret) {
         dev_err(&pdev->dev, "failed to create enable sysfs attribute\n");
+    }
+
+    ret = device_create_file(ksight_dev, &dev_attr_traced_pid);
+    if (ret) {
+        dev_err(&pdev->dev, "failed to create traced_pid sysfs attribute\n");
     }
 
 
@@ -356,7 +360,6 @@ static struct platform_driver ksight_platform_driver = {
     .driver = {
         .name = DRIVER_NAME,
         .of_match_table = ksight_of_match,
-        .owner = THIS_MODULE,
     },
 };
 
@@ -367,26 +370,11 @@ static struct platform_driver ksight_platform_driver = {
 
 static int __init ksight_module_init(void)
 {
-    int ret;
-
-    /* Register the platform driver first */
-    ret = platform_driver_register(&ksight_platform_driver);
-    if (ret)
-        return ret;
-
-    /* Register the platform device to trigger the probe */
-    ksight_pdev = platform_device_register_simple("ksight-shm", -1, NULL, 0);
-    if (IS_ERR(ksight_pdev)) {
-        platform_driver_unregister(&ksight_platform_driver);
-        return PTR_ERR(ksight_pdev);
-    }
-
-    return 0;
+    return platform_driver_register(&ksight_platform_driver);
 }
 
 static void __exit ksight_module_exit(void)
 {
-    platform_device_unregister(ksight_pdev);
     platform_driver_unregister(&ksight_platform_driver);
 }
 

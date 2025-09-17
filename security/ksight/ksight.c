@@ -33,6 +33,7 @@ static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 	struct vm_area_struct *vma;
 	struct mm_struct *mm;
 	unsigned long addr;
+	size_t len;
 
 	/* Bailout if ksight is not enabled */
 	if (!READ_ONCE(ksight_enabled))
@@ -42,18 +43,17 @@ static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 	if (traced_pid != 0 && task_tgid_nr(current) != traced_pid)
 		return 0;
 
+	/* Extract the base address from the io vector */
+	addr = (unsigned long)iter_iov_addr(&msg->msg_iter);
+	len  = iter_iov_len(&msg->msg_iter);
 
 	/* Bailout if there is no message */
-	if (!msg || !msg->msg_iter.count || msg->msg_iter.count == 0)
+	if (!addr || !len)
 		return 0;
 
 	/* Bailout if iov is not a valid user-space buffer */
 	if (!(iter_is_iovec(&msg->msg_iter) || iter_is_ubuf(&msg->msg_iter)))
 		return 0;
-
-	/* Extract the base address from the io vector */
-	iov = iov_iter_iovec(&msg->msg_iter);
-	addr = (u64)iov.iov_base;
 
 	/* Lookup the VMA containing the user buffer */
 	mm = current->mm;
@@ -79,7 +79,7 @@ static int ksight_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 	ev.dst.pid = (u32)task_tgid_nr(current);  /* process */
 	ev.dst.tid = (u32)task_pid_nr(current);   /* thread */
 	ev.dst.id     = (u64)vma->vm_start;
-	ev.dst.size   = iov.iov_len;
+	ev.dst.size   = len;
 
 	up_read(&mm->mmap_lock);
 
@@ -99,6 +99,7 @@ static int ksight_socket_sendmsg(struct socket *sock, struct msghdr *msg,
 	struct vm_area_struct *vma;
 	struct mm_struct *mm;
 	unsigned long addr;
+	size_t len;
 
 
 	/* Bailout if ksight is not enabled */
@@ -109,17 +110,17 @@ static int ksight_socket_sendmsg(struct socket *sock, struct msghdr *msg,
 	if (traced_pid != 0 && task_tgid_nr(current) != traced_pid)
 		return 0;
 
+		/* Extract the base address from the io vector */
+	addr = (unsigned long)iter_iov_addr(&msg->msg_iter);
+	len  = iter_iov_len(&msg->msg_iter);
+
 	/* Bailout if there is no message */
-	if (!msg || !msg->msg_iter.count || msg->msg_iter.count == 0)
+	if (!addr || !len)
 		return 0;
 
 	/* Bailout if iov is not a valid user-space buffer */
 	if (!(iter_is_iovec(&msg->msg_iter) || iter_is_ubuf(&msg->msg_iter)))
 		return 0;
-
-	/* Extract the base address from the io vector */
-	iov = iov_iter_iovec(&msg->msg_iter);
-	addr = (u64)iov.iov_base;
 
 	/* Lookup the VMA containing the user buffer */
 	mm = current->mm;
@@ -137,7 +138,7 @@ static int ksight_socket_sendmsg(struct socket *sock, struct msghdr *msg,
 	ev.src.pid = (u32)task_tgid_nr(current);  /* process */
 	ev.src.tid = (u32)task_pid_nr(current);   /* thread */
 	ev.src.id     = (u64)vma->vm_start;
-	ev.src.size   = iov.iov_len;
+	ev.src.size   = len;
 
 	/* Destination = socket */
 	ev.dst.ksight_obj_type = KS_OBJ_SOCKET;
