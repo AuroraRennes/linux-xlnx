@@ -2,6 +2,11 @@
 set -e
 
 PLNX_PROJ=$1
+RECIPE="linux-xlnx"
+
+if petalinux-devtool status | grep -q "^${}"; then
+    petalinux-devtool reset ${RECIPE}
+fi
 
 petalinux-devtool modify linux-xlnx
 cd components/yocto/workspace/sources/linux-xlnx
