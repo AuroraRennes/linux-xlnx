@@ -7,12 +7,14 @@
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/io.h>
+#include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
+#include <linux/sched/signal.h>
 #include <linux/sysfs.h>
 #include <linux/uaccess.h>
 #include <linux/wait.h>
@@ -22,6 +24,9 @@
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("ksight");
 MODULE_DESCRIPTION("Ksight DMA ring driver for LSM events");
+
+/* Atomic change to only run irq handlers on state change */
+static atomic_t tracing_paused = ATOMIC_INIT(0);
 
 /* Control-block of the ring buffer */
 struct ksight_ring_ctrl {
@@ -60,6 +65,43 @@ static DECLARE_WAIT_QUEUE_HEAD(buf_wq);
 
 static struct class *ksight_class; /* Kernel class for /dev and sysfs */
 static struct device *ksight_dev;  /* Device for user-space interaction */
+
+/* ----------------------
+ * IRQ Handlers
+ * ---------------------- */
+static irqreturn_t fifo_full_irq_handler(int irq, void *dev_id)
+{
+    struct task_struct *task;
+    pid_t pid;
+
+    if (!atomic_xchg(&tracing_paused, 1)) {
+        pid = READ_ONCE(traced_pid);
+        rcu_read_lock();
+        task = find_task_by_vpid(pid);
+        if (task)
+            send_sig(SIGSTOP, task, 0);
+        rcu_read_unlock();
+    }
+
+    return IRQ_HANDLED;
+}
+
+static irqreturn_t fifo_empty_irq_handler(int irq, void *dev_id)
+{
+    struct task_struct *task;
+    pid_t pid;
+
+    if (atomic_xchg(&tracing_paused, 0)) {
+        pid = READ_ONCE(traced_pid);
+        rcu_read_lock();
+        task = find_task_by_vpid(pid);
+        if (task)
+            send_sig(SIGCONT, task, 0);
+        rcu_read_unlock();
+    }
+
+    return IRQ_HANDLED;
+}
 
 /* ----------------------
  * Ring buffer push
@@ -206,6 +248,28 @@ static DEVICE_ATTR_RW(traced_pid);
     struct reserved_mem *rmem;
     struct device_node *np;
     int ret;
+    int irq_full;
+    int irq_empty;
+
+    /* First set up the IRQ and bind it to ksight_irq_handler.
+     * These extract the interrupt line from the device tree node.
+     * See the excerpt below for what is expected.
+     */
+
+    irq_full = platform_get_irq(pdev, 0);
+    irq_empty = platform_get_irq(pdev, 1);
+
+    if (irq_full < 0) return irq_full;
+    if (irq_empty < 0) return irq_empty;
+
+    ret = devm_request_irq(&pdev->dev, irq_full, fifo_full_irq_handler, IRQF_TRIGGER_HIGH,
+                            "ksight", pdev);
+    if (ret) return ret;
+
+    ret = devm_request_irq(&pdev->dev, irq_empty, fifo_empty_irq_handler, IRQF_TRIGGER_HIGH,
+                            "ksight", pdev);
+    if (ret) return ret;
+
 
     /* Find reserved memory from DT via phandle,
      * Needed as the ksight-shm shared memory used
@@ -230,6 +294,10 @@ static DEVICE_ATTR_RW(traced_pid);
             device-name = "ksight-shm0";               // Name of the buffer
             size = <0x04000000>;                       // 64MiB
             memory-region = <&ksight_buffer>;          // Link to the reserved-memory defined earlier
+
+            interrupt-parent = <&gic>;                 // ARM GIC for the controller
+            interrupts = <0 121 4>, <0 122 4>;         // 121 corresponds to pl_ps_irq0 on ultrascale+
+                                                       // Here 121 - FIFO Full, 122 - FIFO empty
         };
     }; */
 
