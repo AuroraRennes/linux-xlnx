@@ -27,6 +27,9 @@ MODULE_DESCRIPTION("Ksight DMA ring driver for LSM events");
 
 /* Atomic change to only run irq handlers on state change */
 static atomic_t tracing_paused = ATOMIC_INIT(0);
+/* Interrupts */
+static int irq_full;
+static int irq_empty;
 
 /* Control-block of the ring buffer */
 struct ksight_ring_ctrl {
@@ -74,8 +77,13 @@ static irqreturn_t fifo_full_irq_handler(int irq, void *dev_id)
     struct task_struct *task;
     pid_t pid;
 
+    if (!ksight_enabled)
+        return IRQ_NONE;
+
     if (!atomic_xchg(&tracing_paused, 1)) {
         pid = READ_ONCE(traced_pid);
+        if (pid <= 0)
+            return IRQ_NONE;
         rcu_read_lock();
         task = find_task_by_vpid(pid);
         if (task)
@@ -91,8 +99,13 @@ static irqreturn_t fifo_empty_irq_handler(int irq, void *dev_id)
     struct task_struct *task;
     pid_t pid;
 
+    if (!ksight_enabled)
+        return IRQ_NONE;
+
     if (atomic_xchg(&tracing_paused, 0)) {
         pid = READ_ONCE(traced_pid);
+        if (pid <= 0)
+            return IRQ_NONE;
         rcu_read_lock();
         task = find_task_by_vpid(pid);
         if (task)
@@ -248,8 +261,6 @@ static DEVICE_ATTR_RW(traced_pid);
     struct reserved_mem *rmem;
     struct device_node *np;
     int ret;
-    int irq_full;
-    int irq_empty;
 
     /* First set up the IRQ and bind it to ksight_irq_handler.
      * These extract the interrupt line from the device tree node.
@@ -262,11 +273,11 @@ static DEVICE_ATTR_RW(traced_pid);
     if (irq_full < 0) return irq_full;
     if (irq_empty < 0) return irq_empty;
 
-    ret = devm_request_irq(&pdev->dev, irq_full, fifo_full_irq_handler, IRQF_TRIGGER_HIGH,
+    ret = devm_request_irq(&pdev->dev, irq_full, fifo_full_irq_handler, IRQF_TRIGGER_RISING,
                             "ksight", pdev);
     if (ret) return ret;
 
-    ret = devm_request_irq(&pdev->dev, irq_empty, fifo_empty_irq_handler, IRQF_TRIGGER_HIGH,
+    ret = devm_request_irq(&pdev->dev, irq_empty, fifo_empty_irq_handler, IRQF_TRIGGER_RISING,
                             "ksight", pdev);
     if (ret) return ret;
 
@@ -398,6 +409,11 @@ err_unmap:
 
 static int ksight_remove(struct platform_device *pdev)
 {
+    if (irq_full >= 0)
+        free_irq(irq_full, pdev);
+    if (irq_empty >= 0)
+        free_irq(irq_empty, pdev);
+
     device_remove_file(ksight_dev, &dev_attr_ring_phys);
     device_destroy(ksight_class, ksight_devt);
     class_destroy(ksight_class);
