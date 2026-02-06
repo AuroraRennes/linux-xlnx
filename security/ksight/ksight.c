@@ -13,6 +13,24 @@
 #include <linux/types.h>
 #include <linux/uio.h>
 
+
+/* Since the driver giving access to the shared memory
+ * cannot be loaded at boot time (as it defines interrupts from the PL),
+ * provide a no-op weak alternatives.
+ */
+
+__weak void ksight_push_event(const struct ksight_tag_event *ev)
+{
+    /* no-op */
+}
+
+__weak dev_t ksight_get_devno(void) {
+	return 0;
+};
+
+__weak bool ksight_enabled;
+__weak pid_t traced_pid;
+
 /* -----------------------
  * LSM hook implementations
  * -----------------------

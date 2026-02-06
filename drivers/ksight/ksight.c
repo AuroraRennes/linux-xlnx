@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 
-#include "ksight.h"
 #include <linux/atomic.h>
 #include <linux/cdev.h>
 #include <linux/errno.h>
@@ -13,12 +12,14 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_reserved_mem.h>
+#include <linux/pid.h>
 #include <linux/platform_device.h>
 #include <linux/sched/signal.h>
 #include <linux/sysfs.h>
 #include <linux/uaccess.h>
 #include <linux/wait.h>
 
+#include <linux/ksight.h>  /* from security/ksight */
 #define DRIVER_NAME "ksight"
 
 MODULE_LICENSE("GPL v2");
@@ -75,17 +76,26 @@ static struct device *ksight_dev;  /* Device for user-space interaction */
 static irqreturn_t fifo_full_irq_handler(int irq, void *dev_id)
 {
     struct task_struct *task;
-    pid_t pid;
+    pid_t pid_num;
+    struct pid *p;
 
     if (!ksight_enabled)
         return IRQ_NONE;
 
-    if (!atomic_xchg(&tracing_paused, 1)) {
-        pid = READ_ONCE(traced_pid);
-        if (pid <= 0)
+    if (atomic_xchg(&tracing_paused, 1)) {
+        /* Get the pid number from sysfs */
+        pid_num = READ_ONCE(traced_pid);
+        if (pid_num <= 0)
             return IRQ_NONE;
+        /* Get the pid struct from pid number */
+        p = find_get_pid(pid_num);
+        if (!p)
+            return IRQ_NONE;
+
+        /* Find and resume the task with associated pid */
         rcu_read_lock();
-        task = find_task_by_vpid(pid);
+        /* task = find_task_by_vpid(pid); // built-in version, not exported */
+        task = pid_task(p, PIDTYPE_PID);
         if (task)
             send_sig(SIGSTOP, task, 0);
         rcu_read_unlock();
@@ -97,17 +107,26 @@ static irqreturn_t fifo_full_irq_handler(int irq, void *dev_id)
 static irqreturn_t fifo_empty_irq_handler(int irq, void *dev_id)
 {
     struct task_struct *task;
-    pid_t pid;
+    pid_t pid_num;
+    struct pid *p;
 
     if (!ksight_enabled)
         return IRQ_NONE;
 
     if (atomic_xchg(&tracing_paused, 0)) {
-        pid = READ_ONCE(traced_pid);
-        if (pid <= 0)
+        /* Get the pid number from sysfs */
+        pid_num = READ_ONCE(traced_pid);
+        if (pid_num <= 0)
             return IRQ_NONE;
+        /* Get the pid struct from pid number */
+        p = find_get_pid(pid_num);
+        if (!p)
+            return IRQ_NONE;
+
+        /* Find and resume the task with associated pid */
         rcu_read_lock();
-        task = find_task_by_vpid(pid);
+        /* task = find_task_by_vpid(pid); // built-in version, not exported */
+        task = pid_task(p, PIDTYPE_PID);
         if (task)
             send_sig(SIGCONT, task, 0);
         rcu_read_unlock();
