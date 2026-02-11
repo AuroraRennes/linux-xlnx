@@ -86,7 +86,7 @@ static irqreturn_t fifo_full_irq_handler(int irq, void *dev_id)
         return IRQ_NONE;
     }
 
-    if (atomic_xchg(&tracing_paused, 1)) {
+    if (!atomic_xchg(&tracing_paused, 1)) {
         pr_info("[IRQ] tracing_paused set, preparing to stop task\n");
 
         /* Get the pid number from sysfs */
