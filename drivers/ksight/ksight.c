@@ -79,25 +79,25 @@ static irqreturn_t fifo_full_irq_handler(int irq, void *dev_id)
     pid_t pid_num;
     struct pid *p;
 
-    pr_info("[IRQ] fifo_full_irq_handler triggered\n");
+    // pr_info("[IRQ] fifo_full_irq_handler triggered\n");
 
     if (!ksight_enabled) {
-        pr_info("[IRQ] ksight not enabled\n");
+        // pr_info("[IRQ] ksight not enabled\n");
         return IRQ_NONE;
     }
 
     if (!atomic_xchg(&tracing_paused, 1)) {
-        pr_info("[IRQ] tracing_paused set, preparing to stop task\n");
+        // pr_info("[IRQ] tracing_paused set, preparing to stop task\n");
 
         /* Get the pid number from sysfs */
         pid_num = READ_ONCE(traced_pid);
-        pr_info("[IRQ] traced_pid = %d\n", pid_num);
+        // pr_info("[IRQ] traced_pid = %d\n", pid_num);
         if (pid_num <= 0)
             return IRQ_NONE;
         /* Get the pid struct from pid number */
         p = find_get_pid(pid_num);
         if (!p) {
-            pr_info("[IRQ] pid struct not found\n");
+            // pr_info("[IRQ] pid struct not found\n");
             return IRQ_NONE;
         }
 
@@ -106,7 +106,7 @@ static irqreturn_t fifo_full_irq_handler(int irq, void *dev_id)
         /* task = find_task_by_vpid(pid); // built-in version, not exported */
         task = pid_task(p, PIDTYPE_PID);
         if (task) {
-            pr_info("[IRQ] sending SIGSTOP to pid %d\n", pid_num);
+            // pr_info("[IRQ] sending SIGSTOP to pid %d\n", pid_num);
             send_sig(SIGSTOP, task, 0);
         }
         rcu_read_unlock();
@@ -121,26 +121,26 @@ static irqreturn_t fifo_empty_irq_handler(int irq, void *dev_id)
     pid_t pid_num;
     struct pid *p;
 
-    pr_info("[IRQ] fifo_empty_irq_handler triggered\n");
+    // pr_info("[IRQ] fifo_empty_irq_handler triggered\n");
 
     if (!ksight_enabled) {
-        pr_info("[IRQ] ksight not enabled\n");
+        // pr_info("[IRQ] ksight not enabled\n");
         return IRQ_NONE;
     }
 
 
     if (atomic_xchg(&tracing_paused, 0)) {
-        pr_info("[IRQ] tracing_paused cleared, preparing to resume task\n");
+        // pr_info("[IRQ] tracing_paused cleared, preparing to resume task\n");
 
         /* Get the pid number from sysfs */
         pid_num = READ_ONCE(traced_pid);
-        pr_info("[IRQ] traced_pid = %d\n", pid_num);
+        // pr_info("[IRQ] traced_pid = %d\n", pid_num);
         if (pid_num <= 0)
             return IRQ_NONE;
         /* Get the pid struct from pid number */
         p = find_get_pid(pid_num);
         if (!p) {
-            pr_info("[IRQ] pid struct not found\n");
+            // pr_info("[IRQ] pid struct not found\n");
             return IRQ_NONE;
         }
 
@@ -149,7 +149,7 @@ static irqreturn_t fifo_empty_irq_handler(int irq, void *dev_id)
         /* task = find_task_by_vpid(pid); // built-in version, not exported */
         task = pid_task(p, PIDTYPE_PID);
         if (task) {
-            pr_info("[IRQ] sending SIGCONT to pid %d\n", pid_num);
+            // pr_info("[IRQ] sending SIGCONT to pid %d\n", pid_num);
             send_sig(SIGCONT, task, 0);
         }
         rcu_read_unlock();
