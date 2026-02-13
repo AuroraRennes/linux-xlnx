@@ -14,6 +14,7 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/pid.h>
 #include <linux/platform_device.h>
+#include <linux/rcupdate.h>
 #include <linux/sched/signal.h>
 #include <linux/sysfs.h>
 #include <linux/uaccess.h>
@@ -27,7 +28,12 @@ MODULE_AUTHOR("ksight");
 MODULE_DESCRIPTION("Ksight DMA ring driver for LSM events");
 
 /* Atomic change to only run irq handlers on state change */
+
 static atomic_t tracing_paused = ATOMIC_INIT(0);
+/* Cached task_struct of the traced process */
+static struct task_struct __rcu *traced_task; // rcu protected
+
+
 /* Interrupts */
 static int irq_full;
 static int irq_empty;
@@ -73,86 +79,65 @@ static struct device *ksight_dev;  /* Device for user-space interaction */
 /* ----------------------
  * IRQ Handlers
  * ---------------------- */
-static irqreturn_t fifo_full_irq_handler(int irq, void *dev_id)
+
+/* Top half
+ \__________ */
+
+static irqreturn_t fifo_full_irq_top(int irq, void *dev_id)
+{
+    if (!ksight_enabled)
+        return IRQ_NONE;
+    return IRQ_WAKE_THREAD;
+}
+
+static irqreturn_t fifo_empty_irq_top(int irq, void *dev_id)
+{
+    if (!ksight_enabled)
+        return IRQ_NONE;
+    return IRQ_WAKE_THREAD;
+}
+
+
+/* Threaded handlers
+ \___________________ */
+
+
+static irqreturn_t fifo_full_irq_thread(int irq, void *dev_id)
 {
     struct task_struct *task;
-    pid_t pid_num;
-    struct pid *p;
-
-    // pr_info("[IRQ] fifo_full_irq_handler triggered\n");
-
-    if (!ksight_enabled) {
-        // pr_info("[IRQ] ksight not enabled\n");
-        return IRQ_NONE;
-    }
 
     if (!atomic_xchg(&tracing_paused, 1)) {
-        // pr_info("[IRQ] tracing_paused set, preparing to stop task\n");
-
-        /* Get the pid number from sysfs */
-        pid_num = READ_ONCE(traced_pid);
-        // pr_info("[IRQ] traced_pid = %d\n", pid_num);
-        if (pid_num <= 0)
-            return IRQ_NONE;
-        /* Get the pid struct from pid number */
-        p = find_get_pid(pid_num);
-        if (!p) {
-            // pr_info("[IRQ] pid struct not found\n");
-            return IRQ_NONE;
-        }
-
-        /* Find and resume the task with associated pid */
         rcu_read_lock();
-        /* task = find_task_by_vpid(pid); // built-in version, not exported */
-        task = pid_task(p, PIDTYPE_PID);
-        if (task) {
-            // pr_info("[IRQ] sending SIGSTOP to pid %d\n", pid_num);
-            send_sig(SIGSTOP, task, 0);
-        }
+        task = rcu_dereference(traced_task);
+        if (task)
+            get_task_struct(task);
         rcu_read_unlock();
+
+        if (task) {
+            send_sig(SIGSTOP, task, 0);
+            put_task_struct(task);
+        }
     }
 
     return IRQ_HANDLED;
 }
 
-static irqreturn_t fifo_empty_irq_handler(int irq, void *dev_id)
+
+static irqreturn_t fifo_empty_irq_thread(int irq, void *dev_id)
 {
     struct task_struct *task;
-    pid_t pid_num;
-    struct pid *p;
-
-    // pr_info("[IRQ] fifo_empty_irq_handler triggered\n");
-
-    if (!ksight_enabled) {
-        // pr_info("[IRQ] ksight not enabled\n");
-        return IRQ_NONE;
-    }
-
 
     if (atomic_xchg(&tracing_paused, 0)) {
-        // pr_info("[IRQ] tracing_paused cleared, preparing to resume task\n");
-
-        /* Get the pid number from sysfs */
-        pid_num = READ_ONCE(traced_pid);
-        // pr_info("[IRQ] traced_pid = %d\n", pid_num);
-        if (pid_num <= 0)
-            return IRQ_NONE;
-        /* Get the pid struct from pid number */
-        p = find_get_pid(pid_num);
-        if (!p) {
-            // pr_info("[IRQ] pid struct not found\n");
-            return IRQ_NONE;
-        }
-
-        /* Find and resume the task with associated pid */
         rcu_read_lock();
-        /* task = find_task_by_vpid(pid); // built-in version, not exported */
-        task = pid_task(p, PIDTYPE_PID);
-        if (task) {
-            // pr_info("[IRQ] sending SIGCONT to pid %d\n", pid_num);
-            send_sig(SIGCONT, task, 0);
-        }
+        task = rcu_dereference(traced_task);
+        if (task)
+            get_task_struct(task);
         rcu_read_unlock();
+
+        if (task) {
+            send_sig(SIGCONT, task, 0);
+            put_task_struct(task);
+        }
     }
 
     return IRQ_HANDLED;
@@ -277,18 +262,39 @@ static ssize_t traced_pid_show(struct device *dev,
     return ret;
 }
 
-/* Store function */
+/* Store function, cached task struct */
+
 static ssize_t traced_pid_store(struct device *dev,
-                                struct device_attribute *attr, const char *buf, size_t count)
+                                struct device_attribute *attr,
+                                const char *buf, size_t count)
 {
     long val;
+    struct pid *p;
+    struct task_struct *task = NULL, *old_task;
 
-    if (kstrtol(buf, 10, &val) < 0)
+    if (kstrtol(buf, 10, &val) < 0 || val <= 0)
         return -EINVAL;
 
-    mutex_lock(&traced_pid_lock);
-    traced_pid = (pid_t)val;
-    mutex_unlock(&traced_pid_lock);
+    /* Resolve PID to task_struct */
+    p = find_get_pid(val);
+    if (!p)
+        return -ESRCH;
+
+    rcu_read_lock();
+    task = pid_task(p, PIDTYPE_PID);
+    if (task)
+        get_task_struct(task);  /* increment refcount */
+    rcu_read_unlock();
+    put_pid(p);
+
+    /* Swap the cached task atomically */
+    old_task = rcu_dereference_protected(traced_task, 1);
+    rcu_assign_pointer(traced_task, task);
+    if (old_task)
+        put_task_struct(old_task);
+
+    /* Update traced_pid for sysfs */
+    traced_pid = val;
 
     return count;
 }
@@ -312,16 +318,25 @@ static DEVICE_ATTR_RW(traced_pid);
     irq_full = platform_get_irq(pdev, 0);
     irq_empty = platform_get_irq(pdev, 1);
 
-    if (irq_full < 0) return irq_full;
-    if (irq_empty < 0) return irq_empty;
+    if (irq_full < 0 || irq_empty < 0)
+        return -EINVAL;
 
-    ret = devm_request_irq(&pdev->dev, irq_full, fifo_full_irq_handler, IRQF_TRIGGER_RISING,
-                            "ksight", pdev);
-    if (ret) return ret;
+    devm_request_threaded_irq(&pdev->dev,
+                            irq_full,
+                            fifo_full_irq_top,
+                            fifo_full_irq_thread,
+                            IRQF_ONESHOT | IRQF_TRIGGER_RISING,
+                            "ksight-full",
+                            pdev);
 
-    ret = devm_request_irq(&pdev->dev, irq_empty, fifo_empty_irq_handler, IRQF_TRIGGER_RISING,
-                            "ksight", pdev);
-    if (ret) return ret;
+    devm_request_threaded_irq(&pdev->dev,
+                            irq_empty,
+                            fifo_empty_irq_top,
+                            fifo_empty_irq_thread,
+                            IRQF_ONESHOT | IRQF_TRIGGER_RISING,
+                            "ksight-empty",
+                            pdev);
+
 
 
     /* Find reserved memory from DT via phandle,
@@ -451,10 +466,15 @@ err_unmap:
 
 static int ksight_remove(struct platform_device *pdev)
 {
-    if (irq_full >= 0)
-        free_irq(irq_full, pdev);
-    if (irq_empty >= 0)
-        free_irq(irq_empty, pdev);
+    struct task_struct *old_task;
+
+    /* Safely drop RCU-traced task reference */
+    synchronize_rcu();
+    old_task = rcu_dereference(traced_task);
+    if (old_task) {
+        put_task_struct(old_task);
+        rcu_assign_pointer(traced_task, NULL);
+    }
 
     device_remove_file(ksight_dev, &dev_attr_ring_phys);
     device_destroy(ksight_class, ksight_devt);
