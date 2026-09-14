@@ -8030,6 +8030,7 @@ static void perf_event_addr_filters_exec(struct perf_event *event, void *data)
 	struct perf_addr_filters_head *ifh = perf_event_addr_filters(event);
 	struct perf_addr_filter *filter;
 	unsigned int restart = 0, count = 0;
+	unsigned int *reset = data;
 	unsigned long flags;
 
 	if (!has_addr_filter(event))
@@ -8046,8 +8047,10 @@ static void perf_event_addr_filters_exec(struct perf_event *event, void *data)
 		count++;
 	}
 
-	if (restart)
+	if (restart) {
 		event->addr_filters_gen++;
+		(*reset)++;
+	}
 	raw_spin_unlock_irqrestore(&ifh->lock, flags);
 
 	if (restart)
@@ -8056,7 +8059,9 @@ static void perf_event_addr_filters_exec(struct perf_event *event, void *data)
 
 void perf_event_exec(void)
 {
-	struct perf_event_context *ctx;
+	struct perf_event_context *ctx, *clone_ctx = NULL;
+	unsigned int reset = 0;
+	unsigned long flags;
 
 	ctx = perf_pin_task_context(current);
 	if (!ctx)
@@ -8064,10 +8069,23 @@ void perf_event_exec(void)
 
 	perf_event_enable_on_exec(ctx);
 	perf_event_remove_on_exec(ctx);
-	perf_iterate_ctx(ctx, perf_event_addr_filters_exec, NULL, true);
+	perf_iterate_ctx(ctx, perf_event_addr_filters_exec, &reset, true);
+
+	/*
+	 * Exec reset file-based filter ranges, which now describe this task's
+	 * mappings only. Unclone, so perf_event_context_sched_out() does not
+	 * swap these events into a task that still maps the filtered object.
+	 */
+	if (reset) {
+		raw_spin_lock_irqsave(&ctx->lock, flags);
+		clone_ctx = unclone_ctx(ctx);
+		raw_spin_unlock_irqrestore(&ctx->lock, flags);
+	}
 
 	perf_unpin_context(ctx);
 	put_ctx(ctx);
+	if (clone_ctx)
+		put_ctx(clone_ctx);
 }
 
 struct remote_output {
@@ -13314,6 +13332,7 @@ inherit_event(struct perf_event *parent_event,
 	      struct perf_event_context *child_ctx)
 {
 	enum perf_event_state parent_state = parent_event->state;
+	struct perf_event *forking_event = parent_event;
 	struct perf_event_pmu_context *pmu_ctx;
 	struct perf_event *child_event;
 	unsigned long flags;
@@ -13334,6 +13353,23 @@ inherit_event(struct perf_event *parent_event,
 					   NULL, NULL, -1);
 	if (IS_ERR(child_event))
 		return child_event;
+
+	/*
+	 * perf_event_alloc() copied the filter ranges of the top-level event,
+	 * which describe the mappings of whichever task holds it now: after a
+	 * context swap or an exec, not the task forking this child. The child
+	 * shares the forking task's mappings, so take its ranges instead.
+	 */
+	if (has_addr_filter(child_event) && forking_event != parent_event) {
+		struct perf_addr_filters_head *ifh = perf_event_addr_filters(child_event);
+
+		raw_spin_lock_irqsave(&ifh->lock, flags);
+		memcpy(child_event->addr_filter_ranges,
+		       forking_event->addr_filter_ranges,
+		       child_event->pmu->nr_addr_filters *
+		       sizeof(struct perf_addr_filter_range));
+		raw_spin_unlock_irqrestore(&ifh->lock, flags);
+	}
 
 	pmu_ctx = find_get_pmu_context(child_event->pmu, child_ctx, child_event);
 	if (IS_ERR(pmu_ctx)) {
