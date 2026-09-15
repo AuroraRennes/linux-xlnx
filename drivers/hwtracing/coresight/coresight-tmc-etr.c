@@ -1561,8 +1561,13 @@ tmc_update_etr_buffer(struct coresight_device *csdev,
 	tmc_sync_etr_buf(drvdata);
 
 	CS_LOCK(drvdata->base);
-	spin_unlock_irqrestore(&drvdata->spinlock, flags);
 
+	/*
+	 * Keep the lock until the hardware is re-armed below: another CPU of
+	 * this session may take the sink as soon as it is released, and
+	 * tmc_enable_etr_sink_perf() does not restart capture for a session
+	 * that already holds the sink.
+	 */
 	lost = etr_buf->full;
 	offset = etr_buf->offset;
 	size = etr_buf->len;
@@ -1608,6 +1613,21 @@ tmc_update_etr_buffer(struct coresight_device *csdev,
 	 * perf ring buffer.
 	 */
 	smp_wmb();
+
+	/*
+	 * tmc_flush_and_stop() left the ETR stopped. If our caller's disable
+	 * drops refcnt to 0 the next enable reprograms it, but if another CPU
+	 * of the session took the sink meanwhile, refcnt stays above 0 and
+	 * the ETR would stay stopped, with every later update copying the
+	 * same stale buffer again. Restart capture from an empty buffer now,
+	 * as a disable/enable cycle would.
+	 */
+	CS_UNLOCK(drvdata->base);
+	tmc_disable_hw(drvdata);
+	CS_LOCK(drvdata->base);
+	if (__tmc_etr_enable_hw(drvdata))
+		lost = true;
+	spin_unlock_irqrestore(&drvdata->spinlock, flags);
 
 out:
 	/*
